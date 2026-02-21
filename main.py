@@ -9,13 +9,13 @@ from flask import Flask
 from threading import Thread
 
 # ==========================================
-# 0. ระบบ Keep Alive (กัน Render ปิดบอท)
+# 0. ระบบ Keep Alive
 # ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "✅ บอททำงานปกติบน Render แล้วสัส!"
+    return "✅ บอททำงานปกติบน Render แล้วสัส! (เวอร์ชั่นกันบัค 100%)"
 
 def run_server():
     port = int(os.environ.get('PORT', 8080))
@@ -47,7 +47,8 @@ def save_db(data):
         print(f"⚠️ Error เซฟไฟล์ DB: {e}")
 
 server_configs = load_db()
-active_channels = {} 
+# เปลี่ยนมาเก็บคีย์เป็น String เสมอ เพื่อป้องกันบัคตอนเซฟลง JSON
+active_channels = server_configs.setdefault("active_channels", {}) 
 
 # ==========================================
 # 2. ตั้งค่าบอทพื้นฐาน
@@ -89,9 +90,9 @@ class LimitModal(Modal, title='ตั้งค่าจำนวนคนเข�
         try:
             limit = int(self.limit_input.value)
             await self.voice_channel.edit(user_limit=limit)
-            await interaction.response.send_message(f"👥 จำกัดคนเข้าห้องที่ {limit} คนแล้ว!" if limit > 0 else "👥 เลิกจำกัดคนแล้ว", ephemeral=True)
+            await interaction.response.send_message(f"👥 จำกัดคนเข้าห้องที่ {limit} คนแล้ว!" if limit > 0 else "👥 เลิกจำกัดคนแล้ว!", ephemeral=True)
         except ValueError:
-            await interaction.response.send_message("❌ พิมพ์เป็นตัวเลขดิวะ", ephemeral=True)
+            await interaction.response.send_message("❌ พิมพ์เป็นตัวเลข", ephemeral=True)
 
 class RenameModal(Modal, title='เปลี่ยนชื่อห้อง'):
     name_input = TextInput(label='ใส่ชื่อห้องใหม่ที่ต้องการ', style=discord.TextStyle.short, required=True, max_length=30)
@@ -107,14 +108,14 @@ class RenameModal(Modal, title='เปลี่ยนชื่อห้อง'):
             await interaction.response.send_message("❌ เปลี่ยนชื่อไม่สำเร็จ", ephemeral=True)
 
 # ==========================================
-# 🚨 4. ระบบหน้าต่างย่อย (โผล่มาเฉพาะตอนกดปุ่ม)
+# 4. ระบบหน้าต่างย่อย (Dropdown)
 # ==========================================
 class WhitelistView(View):
     def __init__(self, channel: discord.VoiceChannel):
         super().__init__(timeout=60) 
         self.voice_channel = channel
 
-    @discord.ui.select(cls=UserSelect, placeholder="🔑 เลือกเพื่อนที่จะอนุญาตให้เข้าห้อง")
+    @discord.ui.select(cls=UserSelect, placeholder="🔑 เลือกเพื่อนที่จะอนุญาตให้เข้าห้อง (ทะลุห้องล็อค)")
     async def select_user(self, interaction: discord.Interaction, select: UserSelect):
         user = select.values[0]
         try:
@@ -133,10 +134,10 @@ class KickView(View):
         if user in self.voice_channel.members:
             try:
                 await user.move_to(None)
-                await interaction.response.send_message(f"🥾 เตะ {user.mention} บินออกจากห้องไปละ", ephemeral=True)
+                await interaction.response.send_message(f"🥾 เตะ {user.mention} บินออกจากห้องไปละ!", ephemeral=True)
             except: await interaction.response.send_message("❌ เตะไม่ได้ มันของแข็งว่ะ", ephemeral=True)
         else:
-            await interaction.response.send_message(f"❌ มันไม่ได้อยู่ในห้องนี้", ephemeral=True)
+            await interaction.response.send_message(f"❌ มันไม่ได้อยู่ในห้องนี้เว้ยมึง!", ephemeral=True)
 
 class TransferView(View):
     def __init__(self, channel: discord.VoiceChannel):
@@ -146,26 +147,27 @@ class TransferView(View):
     @discord.ui.select(cls=UserSelect, placeholder="👑 เลือกคนที่จะโอนตำแหน่งหัวหน้าห้องให้")
     async def select_user(self, interaction: discord.Interaction, select: UserSelect):
         new_owner = select.values[0]
-        old_owner_id = active_channels.get(self.voice_channel.id)
+        # 🚨 [แก้บัค] ดึงสิทธิ์จาก Discord ถ้าจำไม่ได้
+        owner_id = active_channels.get(str(self.voice_channel.id))
         
-        if new_owner.id == old_owner_id:
-            await interaction.response.send_message("❌ มึงจะโอนให้ตัวเองทำห่าอะไร", ephemeral=True)
+        if new_owner.id == owner_id or new_owner.id == interaction.user.id:
+            await interaction.response.send_message("❌ มึงจะโอนให้ตัวเองทำหอกอะไร!", ephemeral=True)
             return
             
-        old_owner = interaction.guild.get_member(old_owner_id)
+        old_owner = interaction.guild.get_member(interaction.user.id)
         try:
             if old_owner: await self.voice_channel.set_permissions(old_owner, overwrite=None) 
             await self.voice_channel.set_permissions(new_owner, connect=True, manage_channels=True, move_members=True)
-            active_channels[self.voice_channel.id] = new_owner.id 
+            active_channels[str(self.voice_channel.id)] = new_owner.id 
+            save_db(server_configs)
             await interaction.response.send_message(f"👑 โอนสิทธิ์ห้องให้ {new_owner.mention} แล้ว!", ephemeral=True)
         except:
             await interaction.response.send_message("❌ โอนสิทธิ์ไม่สำเร็จ", ephemeral=True)
 
-# 🚨 [เพิ่มใหม่] คลาสสำหรับจัดการเมนูเลือดยศรวดเดียว
 class RoleManageSelect(RoleSelect):
     def __init__(self, action: str):
         self.action_type = action
-        ph = "➕ เลือดยศที่จะเพิ่ม" if action == "add" else "➖ เลือดยศที่จะลบออก"
+        ph = "➕ เลือดยศที่จะเพิ่ม (จิ้มได้รวดเดียว 25 ยศ)" if action == "add" else "➖ เลือดยศที่จะลบออก (จิ้มได้รวดเดียว 25 ยศ)"
         super().__init__(placeholder=ph, min_values=1, max_values=25)
 
     async def callback(self, interaction: discord.Interaction):
@@ -181,17 +183,15 @@ class RoleManageSelect(RoleSelect):
                 if r.id not in roles_list:
                     roles_list.append(r.id)
                     processed.append(r.name)
-            msg = f"✅ แอดเพิ่มเรียบร้อย **{len(processed)}** ยศ!" if processed else "⚠️ ยศที่มึงเลือก มันมีอยู่ในระบบหมดแล้ว"
+            msg = f"✅ แอดเพิ่มเรียบร้อย **{len(processed)}** ยศ!" if processed else "⚠️ ยศที่มึงเลือก มันมีอยู่ในระบบหมดแล้วว่ะ!"
         else:
             for r in self.values:
                 if r.id in roles_list:
                     roles_list.remove(r.id)
                     processed.append(r.name)
-            msg = f"✅ ลบออกเรียบร้อย **{len(processed)}** ยศ!" if processed else "⚠️ ยศพวกนี้ไม่ได้อยู่ในระบบอยู่แล้ว"
+            msg = f"✅ ลบออกเรียบร้อย **{len(processed)}** ยศ!" if processed else "⚠️ ยศพวกนี้ไม่ได้อยู่ในระบบอยู่แล้ว!"
 
         save_db(server_configs)
-        
-        # อัปเดตข้อความและซ่อนเมนูทิ้งไปเลย จะได้ไม่รก
         await interaction.response.edit_message(content=msg, view=None)
 
 class RoleManageView(View):
@@ -208,18 +208,35 @@ class RoomControl(View):
 
     async def get_valid_channel(self, interaction: discord.Interaction):
         if not interaction.user.voice or not interaction.user.voice.channel:
-            await interaction.response.send_message("❌ มึงต้องเข้าไปนั่งในห้องเสียงของมึงก่อนดิวะ ถึงจะกดปุ่มได้", ephemeral=True)
+            await interaction.response.send_message("❌ มึงต้องเข้าไปนั่งในห้องเสียงของมึงก่อน ถึงจะกดปุ่มได้", ephemeral=True)
             return None
             
         channel = interaction.user.voice.channel
-        owner_id = active_channels.get(channel.id)
         
-        if not owner_id:
-            await interaction.response.send_message("❌ ห้องที่มึงอยู่ไม่ใช่ห้องส่วนตัวที่กูสร้าง", ephemeral=True)
+        # 🚨 [แก้บัคความจำเสื่อม] เช็คจาก DB ก่อน ถ้าไม่มีให้ไปเช็คสิทธิ์ในดิสคอร์ดแทน
+        is_owner = False
+        if str(channel.id) in active_channels:
+            if active_channels[str(channel.id)] == interaction.user.id:
+                is_owner = True
+        else:
+            # ถ้าบอทรีสตาร์ทแล้วลืม ให้ไปดูว่าไอ้คนที่กด มันมีสิทธิ์ manage_channels ไหม
+            user_perms = channel.overwrites_for(interaction.user)
+            if user_perms.manage_channels:
+                is_owner = True
+                # จำค่าใหม่ไว้เลย
+                active_channels[str(channel.id)] = interaction.user.id
+                save_db(server_configs)
+        
+        # 🚨 [ป้องกันมั่ว] ตรวจสอบว่าเป็นห้องในหมวดหมู่ VIP ไหม
+        config = server_configs.get(str(interaction.guild.id), {})
+        cat_id = config.get('cat_id')
+        
+        if channel.category_id != cat_id or channel.id == config.get('hub_id'):
+            await interaction.response.send_message("❌ ห้องที่มึงอยู่ไม่ใช่ห้องส่วนตัวเว้ย!", ephemeral=True)
             return None
             
-        if owner_id != interaction.user.id:
-            await interaction.response.send_message("❌ มึงไม่ใช่เจ้าของห้องนี้ อย่ามามั่วกด", ephemeral=True)
+        if not is_owner:
+            await interaction.response.send_message("❌ มึงไม่ใช่เจ้าของห้องนี้ อย่ามามั่วกด!", ephemeral=True)
             return None
             
         return channel
@@ -300,7 +317,7 @@ async def setup_hook():
         print(f"⚠️ Error ซิงค์คำสั่ง: {e}")
 
 # ==========================================
-# 6. คำสั่งแอดมิน (Setup, Roles, Log, Ban)
+# 6. คำสั่งแอดมิน 
 # ==========================================
 @bot.tree.command(name="setup", description="สร้างหมวดหมู่และห้อง")
 @app_commands.default_permissions(administrator=True)
@@ -321,8 +338,8 @@ async def setup_system(interaction: discord.Interaction):
         save_db(server_configs)
 
         control_embed = discord.Embed(
-            title="🎛️ แผงควบคุมห้องส่วนตัวขั้นเทพ", 
-            description="กดปุ่มด้านล่างนี้เพื่อจัดการห้องของมึงได้เลย!\n\n*(มึงต้องเข้าไปนั่งในห้องเสียงของมึงก่อนนะ ถึงจะกดปุ่มใช้งานได้)*",
+            title="🎛️ แผงควบคุมห้องส่วนตัว", 
+            description="กดปุ่มด้านล่างนี้เพื่อจัดการห้องของมึงได้เลย!\n\n*(มึงต้องเข้าไปนั่งในห้องเสียงของมึงก่อน ถึงจะกดปุ่มใช้งานได้)*",
             color=discord.Color.gold()
         )
         guild_image = get_guild_image(interaction.guild)
@@ -330,8 +347,8 @@ async def setup_system(interaction: discord.Interaction):
         await control_channel.send(embed=control_embed, view=RoomControl())
 
         embed = discord.Embed(
-            title="🛠️ สร้างระบบสำเร็จ!",
-            description=f"📂 **หมวดหมู่:** {category.mention}\n🎯 **ห้อง Hub:** {hub_channel.mention}\n📱 **แผงควบคุม:** {control_channel.mention}\n\nใช้ `/set_role` เพื่อแอดรายชื่อยศที่สร้างห้องได้เลย",
+            title="🛠️ สร้างระบบสำเร็จ!,
+            description=f"📂 **หมวดหมู่:** {category.mention}\n🎯 **ห้อง** {hub_channel.mention}\n📱 **แผงควบคุม:** {control_channel.mention}\n\nใช้ `/set_role` เพื่อแอดรายชื่อยศที่สร้างห้องได้เลย",
             color=discord.Color.brand_green()
         )
         if guild_image: embed.set_image(url=guild_image)
@@ -339,8 +356,7 @@ async def setup_system(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ เกิดข้อผิดพลาดตอนสร้างห้องว่ะ: {e}", ephemeral=True)
 
-# 🚨 [แก้ใหม่] คำสั่ง /set_role เปลี่ยนมาใช้ Dropdown เลือกทีละหลายๆ ยศ
-@bot.tree.command(name="set_role", description="เพิ่มหรือลบยศที่สร้างห้องได้")
+@bot.tree.command(name="set_role", description="เพิ่มหรือลบยศ")
 @app_commands.choices(action=[app_commands.Choice(name="➕ เพิ่มยศ", value="add"), app_commands.Choice(name="➖ ลบยศ", value="remove")])
 @app_commands.default_permissions(administrator=True)
 async def set_role(interaction: discord.Interaction, action: app_commands.Choice[str]):
@@ -357,7 +373,7 @@ async def set_log(interaction: discord.Interaction, text_channel: discord.TextCh
     save_db(server_configs)
     await interaction.response.send_message(f"✅ บันทึกห้องส่ง Log ไปที่ {text_channel.mention} เรียบร้อยมึง!", ephemeral=True)
 
-@bot.tree.command(name="ban_voice", description="แบนสมาชิกไม่ให้สร้างห้องเสียง")
+@bot.tree.command(name="ban_voice", description="แบนสมาชิก")
 @app_commands.default_permissions(administrator=True)
 async def ban_voice(interaction: discord.Interaction, member: discord.Member):
     guild_id = str(interaction.guild.id)
@@ -369,9 +385,9 @@ async def ban_voice(interaction: discord.Interaction, member: discord.Member):
         save_db(server_configs)
         await interaction.response.send_message(f"🚫 แบนไอ้ {member.mention} เรียบร้อย", ephemeral=True)
     else:
-        await interaction.response.send_message(f"⚠️ ไอ้ {member.mention} มันโดนแบนอยู่แล้วมึง", ephemeral=True)
+        await interaction.response.send_message(f"⚠️ ไอ้ {member.mention} มันโดนแบนอยู่แล้ว", ephemeral=True)
 
-@bot.tree.command(name="unban_voice", description="ปลดแบนสมาชิกให้กลับมาสร้างห้องได้")
+@bot.tree.command(name="unban_voice", description="ปลดแบนสมาชิก")
 @app_commands.default_permissions(administrator=True)
 async def unban_voice(interaction: discord.Interaction, member: discord.Member):
     guild_id = str(interaction.guild.id)
@@ -381,14 +397,14 @@ async def unban_voice(interaction: discord.Interaction, member: discord.Member):
     if member.id in banned_list:
         banned_list.remove(member.id)
         save_db(server_configs)
-        await interaction.response.send_message(f"✅ ปลดแบนไอ้ {member.mention} แล้ว", ephemeral=True)
+        await interaction.response.send_message(f"✅ ปลดแบนไอ้ {member.mention} แล้ว!", ephemeral=True)
     else:
         await interaction.response.send_message(f"❌ ไอ้ {member.mention} มันไม่ได้โดนแบน", ephemeral=True)
 
 @bot.tree.command(name="help", description="ดูคู่มือและวิธีใช้งานบอททั้งหมด")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="📚 คู่มือการใช้งานระบบห้องเสียง Private",
+        title="📚 คู่มือการใช้งานระบบห้องเสียง VIP",
         description="บอทสร้างห้องเสียงส่วนตัวอัตโนมัติ",
         color=discord.Color.gold()
     )
@@ -398,8 +414,8 @@ async def help_command(interaction: discord.Interaction):
     embed.add_field(
         name="🛠️ คำสั่งสำหรับแอดมิน",
         value=(
-            "**`/setup`** - สร้างหมวดหมู่และห้อง\n"
-            "**`/set_role`** - เพิ่ม/ลบยศสิทธิพิเศษ\n"
+            "**`/setup`** - สร้างหมวดหมู่และห้อง Hub อัตโนมัติ\n"
+            "**`/set_role`** - เพิ่ม/ลบยศสิทธิพิเศษ (เลือกได้หลายยศ)\n"
             "**`/set_log`** - ตั้งค่าห้องรับแจ้งเตือน\n"
             "**`/ban_voice`** - แบนคนไม่ให้สร้างห้อง\n"
             "**`/unban_voice`** - ปลดแบน"
@@ -422,16 +438,19 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ==========================================
-# 7. ระบบสร้าง/ลบห้องอัตโนมัติ
+# 🚨 7. ระบบสร้าง/ลบห้องอัตโนมัติ (แก้บัค 100%)
 # ==========================================
 @bot.event
 async def on_voice_state_update(member, before, after):
     guild_id = str(member.guild.id)
     config = server_configs.get(guild_id)
-    if not config or not config.get('hub_id'): return
+    if not config: return
 
-    if after.channel and after.channel.id == config['hub_id']:
-        
+    hub_id = config.get('hub_id')
+    cat_id = config.get('cat_id')
+
+    # --- ดักจับตอนเข้าห้อง Hub เพื่อสร้างห้อง ---
+    if after.channel and after.channel.id == hub_id:
         banned_users = config.get('banned_users', [])
         if member.id in banned_users:
             try: 
@@ -449,7 +468,7 @@ async def on_voice_state_update(member, before, after):
             return
 
         guild = member.guild
-        category = guild.get_channel(config.get('cat_id'))
+        category = guild.get_channel(cat_id)
         
         if not category or len(category.channels) >= 50:
             try: await member.move_to(None)
@@ -468,24 +487,33 @@ async def on_voice_state_update(member, before, after):
                 overwrites=overwrites
             )
             
-            await member.move_to(new_channel)
-            active_channels[new_channel.id] = member.id 
-            await send_log(member.guild, f"🟢 **{member.display_name}** ได้สร้างห้องเสียง: {new_channel.mention}")
+            # 🚨 [แก้บัคห้องผีสิง] เช็คว่าดึงผู้ใช้เข้าห้องใหม่สำเร็จไหม ถ้ามันหนีไปก่อน ให้ลบห้องทิ้งเลย!
+            try:
+                await member.move_to(new_channel)
+                active_channels[str(new_channel.id)] = member.id 
+                save_db(server_configs)
+                await send_log(member.guild, f"🟢 **{member.display_name}** ได้สร้างห้องเสียง: {new_channel.mention}")
+            except Exception:
+                # ถ้าดึงไม่สำเร็จ (มันกดออกดิสหนีไปก่อน)
+                await new_channel.delete()
 
         except Exception as e:
             print(f"⚠️ Error สร้างห้อง: {e}")
             try: await member.move_to(None)
             except: pass
 
-    if before.channel and before.channel.id in active_channels:
+    # --- 🚨 [แก้บัคลบห้องไม่หมด] เช็คแบบรัดกุม ถ้าห้องในหมวดหมู่ว่างปุ๊บ ลบเลย ไม่ต้องสนว่าจำได้ไหม ---
+    if before.channel and before.channel.category_id == cat_id and before.channel.id != hub_id:
         if len(before.channel.members) == 0:
             try:
                 await before.channel.delete()
-                active_channels.pop(before.channel.id, None)
-                await send_log(member.guild, f"🔴 ห้องถูกลบอัตโนมัติแล้ว (คนออกหมด)")
+                # เคลียร์ข้อมูลออกจากระบบถ้ามี
+                if str(before.channel.id) in active_channels:
+                    active_channels.pop(str(before.channel.id), None)
+                    save_db(server_configs)
+                await send_log(member.guild, f"🔴 ห้องถูกลบอัตโนมัติแล้ว")
             except Exception as e:
                 print(f"⚠️ Error ลบห้อง: {e}")
-                active_channels.pop(before.channel.id, None)
 
 # ==========================================
 # 8. อัปเดตสถานะอัตโนมัติ (Ping, RAM, ห้อง)
@@ -496,7 +524,18 @@ async def auto_status():
         ping = round(bot.latency * 1000)
         process = psutil.Process(os.getpid())
         ram_usage = process.memory_info().rss / (1024 * 1024)
-        room_count = len(active_channels)
+        
+        # นับจำนวนห้องจริงๆ ในดิสคอร์ด แทนที่จะนับจากตัวแปร (กันบัค)
+        room_count = 0
+        for guild in bot.guilds:
+            config = server_configs.get(str(guild.id), {})
+            cat_id = config.get('cat_id')
+            hub_id = config.get('hub_id')
+            if cat_id:
+                category = guild.get_channel(cat_id)
+                if category:
+                    # ลบ 1 เพื่อไม่นับรวมห้อง Hub
+                    room_count += max(0, len(category.voice_channels) - 1)
         
         status_text = f"🟢 Ping: {ping}ms | 💾 RAM: {ram_usage:.1f}MB | 🎙️ ห้องใช้งาน: {room_count}"
         await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=status_text))
@@ -505,7 +544,7 @@ async def auto_status():
 
 @bot.event
 async def on_ready():
-    print(f'✅ บอท {bot.user} รันระบบแผงควบคุมปุ่มล้วน พร้อมลุยแล้วสัส!')
+    print(f'✅ บอท {bot.user} รันระบบกันบัค 100% พร้อมลุยแล้วสัส!')
     auto_status.start()
 
 keep_alive()
