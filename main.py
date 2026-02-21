@@ -88,9 +88,9 @@ class LimitModal(Modal, title='ตั้งค่าจำนวนคนเข�
             await self.voice_channel.edit(user_limit=limit)
             await interaction.response.send_message(f"👥 จำกัดคนเข้าห้องที่ {limit} คนแล้ว!" if limit > 0 else "👥 เลิกจำกัดคนแล้ว!", ephemeral=True)
         except ValueError:
-            await interaction.response.send_message("❌ พิมพ์เป็นตัวเลขดิวะ!", ephemeral=True)
+            await interaction.response.send_message("❌ พิมพ์เป็นตัวเลข", ephemeral=True)
         except Exception:
-            await interaction.response.send_message("❌ เกิดข้อผิดพลาดตอนแก้ห้องว่ะ", ephemeral=True)
+            await interaction.response.send_message("❌ เกิดข้อผิดพลาดตอนแก้ห้อง", ephemeral=True)
 
 class RenameModal(Modal, title='เปลี่ยนชื่อห้อง'):
     name_input = TextInput(label='ใส่ชื่อห้องใหม่ที่ต้องการ', style=discord.TextStyle.short, required=True, max_length=30)
@@ -193,7 +193,7 @@ class RoomControl(View):
         old_owner = interaction.guild.get_member(old_owner_id)
         try:
             if old_owner: await self.voice_channel.set_permissions(old_owner, overwrite=None) 
-            await self.voice_channel.set_permissions(new_owner, connect=True, manage_channels=True, move_members=True, send_messages=True)
+            await self.voice_channel.set_permissions(new_owner, connect=True, manage_channels=True, move_members=True)
             active_channels[self.voice_channel.id] = new_owner.id 
             await interaction.response.send_message(f"👑 โอนสิทธิ์ห้องให้ {new_owner.mention} แล้ว!", ephemeral=True)
         except:
@@ -206,17 +206,7 @@ async def setup_system(interaction: discord.Interaction):
     guild_id = str(interaction.guild.id)
     
     try:
-        default_overwrites = {}
-        for role in interaction.guild.roles:
-            default_overwrites[role] = discord.PermissionOverwrite(
-                view_channel=True, connect=True, send_messages=False,
-                create_public_threads=False, create_private_threads=False, read_message_history=True
-            )
-        default_overwrites[interaction.guild.me] = discord.PermissionOverwrite(
-            view_channel=True, connect=True, send_messages=True, manage_channels=True, manage_permissions=True
-        )
-
-        category = await interaction.guild.create_category("🌟 | VIP VOICE ROOMS", overwrites=default_overwrites)
+        category = await interaction.guild.create_category("🌟 | VIP VOICE ROOMS")
         hub_channel = await interaction.guild.create_voice_channel("➕ | กดเพื่อสร้างห้องส่วนตัว", category=category)
 
         if guild_id not in server_configs:
@@ -301,7 +291,6 @@ async def help_command(interaction: discord.Interaction):
         description="บอทสร้างห้องเสียงส่วนตัวอัตโนมัติ",
         color=discord.Color.gold()
     )
-    
     guild_image = get_guild_image(interaction.guild)
     if guild_image: embed.set_thumbnail(url=guild_image)
 
@@ -317,7 +306,7 @@ async def help_command(interaction: discord.Interaction):
         inline=False
     )
     embed.add_field(
-        name="🎛️ ปุ่มในแผงควบคุม (สำหรับเจ้าของห้อง)",
+        name="🎛️ ปุ่มในแผงควบคุม",
         value=(
             "🔒 **ล็อค** / 🔓 **ปลดล็อค** - ปิด/เปิดไม่ให้คนอื่นเข้า\n"
             "👻 **ซ่อน** / 👁️ **แสดง** - ทำให้ห้องหายไปจากสายตาคนอื่น\n"
@@ -329,7 +318,7 @@ async def help_command(interaction: discord.Interaction):
         ),
         inline=False
     )
-    embed.set_footer(text=f"ร้องขอโดย {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+    embed.set_footer(text=f"{interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -366,18 +355,10 @@ async def on_voice_state_update(member, before, after):
             return
 
         try:
-            overwrites = {}
-            for role in guild.roles:
-                overwrites[role] = discord.PermissionOverwrite(
-                    connect=True, view_channel=True, send_messages=False,
-                    create_public_threads=False, create_private_threads=False, read_message_history=True
-                )
-            overwrites[member] = discord.PermissionOverwrite(
-                connect=True, manage_channels=True, move_members=True, send_messages=True, read_message_history=True
-            )
-            overwrites[guild.me] = discord.PermissionOverwrite(
-                connect=True, view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True
-            )
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
+                member: discord.PermissionOverwrite(connect=True, manage_channels=True, move_members=True)
+            }
 
             new_channel = await guild.create_voice_channel(
                 name=f"👑 ห้องของ {member.display_name}",
@@ -389,8 +370,8 @@ async def on_voice_state_update(member, before, after):
             active_channels[new_channel.id] = member.id 
 
             embed = discord.Embed(
-                title="🎛️ แผงควบคุมห้องส่วนตัว", 
-                description="กดปุ่มหรือเลือกเมนูด้านล่างเพื่อจัดการห้องได้เลย!\n",
+                title="🎛️ แผงควบคุมห้องส่วนตัวขั้นเทพ", 
+                description="กดปุ่มหรือเลือกเมนูด้านล่างเพื่อจัดการห้องของมึงได้เลย!\n(ใครไม่ใช่เจ้าของห้องมากด กูเตะก้านคอ)",
                 color=discord.Color.gold()
             )
             guild_image = get_guild_image(guild)
@@ -420,14 +401,11 @@ async def on_voice_state_update(member, before, after):
 async def auto_status():
     try:
         ping = round(bot.latency * 1000)
-        
         process = psutil.Process(os.getpid())
         ram_usage = process.memory_info().rss / (1024 * 1024)
-        
         room_count = len(active_channels)
         
         status_text = f"🟢 Ping: {ping}ms | 💾 RAM: {ram_usage:.1f}MB | 🎙️ ห้องใช้งาน: {room_count}"
-        
         await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=status_text))
     except Exception as e:
         print(f"⚠️ Error อัปเดตสถานะ: {e}")
