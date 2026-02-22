@@ -15,7 +15,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "✅ บอททำงานปกติบน Render แล้วสัส! (เวอร์ชั่นแก้บัค 100%)"
+    return "✅ บอททำงานปกติบน Render แล้วสัส!"
 
 def run_server():
     port = int(os.environ.get('PORT', 8080))
@@ -210,7 +210,6 @@ class RoomControl(View):
             return None
             
         channel = interaction.user.voice.channel
-        
         is_owner = False
         if str(channel.id) in active_channels:
             if active_channels[str(channel.id)] == interaction.user.id:
@@ -235,22 +234,52 @@ class RoomControl(View):
             
         return channel
 
+    # ฟังก์ชันจัดการตบทุกยศ (ใช้สำหรับปุ่มล็อค/ซ่อน)
+    async def update_room_perms(self, channel, perm_type, value):
+        overwrites = channel.overwrites
+        guild = channel.guild
+        
+        if guild.default_role not in overwrites:
+            overwrites[guild.default_role] = discord.PermissionOverwrite()
+        
+        if perm_type == "lock":
+            overwrites[guild.default_role].connect = value
+        elif perm_type == "hide":
+            overwrites[guild.default_role].view_channel = value
+
+        roles_to_modify = [r for r in guild.roles if not r.permissions.administrator and not r.is_bot_managed() and r != guild.default_role]
+        
+        for role in roles_to_modify[:80]:
+            if role not in overwrites:
+                overwrites[role] = discord.PermissionOverwrite()
+            
+            if perm_type == "lock":
+                overwrites[role].connect = value
+            elif perm_type == "hide":
+                overwrites[role].view_channel = value
+                
+            if overwrites[role].is_empty():
+                del overwrites[role]
+                
+        await channel.edit(overwrites=overwrites)
+
     @discord.ui.button(label="ล็อค", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="btn_lock", row=0)
     async def lock(self, interaction: discord.Interaction, button: Button):
         channel = await self.get_valid_channel(interaction)
         if not channel: return
         try:
-            await channel.set_permissions(interaction.guild.default_role, connect=False)
-            await interaction.response.send_message("🔒 ล็อคห้องแล้ว! คนอื่นห้ามเข้า", ephemeral=True)
-        except: pass
+            await self.update_room_perms(channel, "lock", False)
+            await interaction.response.send_message("🔒 ล็อคห้องแล้ว! ทุกยศโดนบล็อคห้ามเข้าเด็ดขาด", ephemeral=True)
+        except Exception as e: 
+            await interaction.response.send_message(f"❌ ล็อคห้องไม่ได้: {e}", ephemeral=True)
 
     @discord.ui.button(label="ปลดล็อค", style=discord.ButtonStyle.success, emoji="🔓", custom_id="btn_unlock", row=0)
     async def unlock(self, interaction: discord.Interaction, button: Button):
         channel = await self.get_valid_channel(interaction)
         if not channel: return
         try:
-            await channel.set_permissions(interaction.guild.default_role, connect=True)
-            await interaction.response.send_message("🔓 ปลดล็อคห้องแล้ว!", ephemeral=True)
+            await self.update_room_perms(channel, "lock", None)
+            await interaction.response.send_message("🔓 ปลดล็อคห้องแล้ว! คนอื่นเข้ามาได้ปกติ", ephemeral=True)
         except: pass
 
     @discord.ui.button(label="ซ่อน", style=discord.ButtonStyle.secondary, emoji="👻", custom_id="btn_hide", row=0)
@@ -258,8 +287,8 @@ class RoomControl(View):
         channel = await self.get_valid_channel(interaction)
         if not channel: return
         try:
-            await channel.set_permissions(interaction.guild.default_role, view_channel=False)
-            await interaction.response.send_message("👻 ซ่อนห้องเรียบร้อย!", ephemeral=True)
+            await self.update_room_perms(channel, "hide", False)
+            await interaction.response.send_message("👻 ซ่อนห้องเรียบร้อย! ไม่มีใครเห็นมึงแน่นอน", ephemeral=True)
         except: pass
 
     @discord.ui.button(label="แสดง", style=discord.ButtonStyle.primary, emoji="👁️", custom_id="btn_unhide", row=0)
@@ -267,7 +296,7 @@ class RoomControl(View):
         channel = await self.get_valid_channel(interaction)
         if not channel: return
         try:
-            await channel.set_permissions(interaction.guild.default_role, view_channel=True)
+            await self.update_room_perms(channel, "hide", None)
             await interaction.response.send_message("👁️ แสดงห้องปกติแล้ว!", ephemeral=True)
         except: pass
 
@@ -301,7 +330,6 @@ class RoomControl(View):
         if not channel: return
         await interaction.response.send_message("👇 เลือกชื่อคนที่มึงต้องการโอนตำแหน่งหัวหน้าห้องให้:", view=TransferView(channel), ephemeral=True)
 
-# 🚨 [แก้บัคที่นี่!] รวม Setup Hook ไว้จุดเดียว ไม่ซ้ำซ้อนแล้ว!
 async def system_setup_hook():
     bot.add_view(RoomControl())
     try:
@@ -434,7 +462,7 @@ async def help_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ==========================================
-# 7. ระบบสร้าง/ลบห้องอัตโนมัติ
+# 🚨 7. ระบบสร้าง/ลบห้องอัตโนมัติ (แก้ไขตามสั่ง)
 # ==========================================
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -471,10 +499,14 @@ async def on_voice_state_update(member, before, after):
             return
 
         try:
+            # 🚨 [แก้ใหม่ตามที่มึงบอก] ซ่อนเฉพาะแค่ @everyone เท่านั้น ยศอื่นปล่อยโชว์ปกติ
             overwrites = {
-                guild.default_role: discord.PermissionOverwrite(connect=True, view_channel=True),
-                member: discord.PermissionOverwrite(connect=True, manage_channels=True, move_members=True)
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                member: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True, move_members=True),
+                guild.me: discord.PermissionOverwrite(view_channel=True, connect=True, manage_channels=True, manage_permissions=True)
             }
+            
+            # ไม่มีการบล็อคยศอื่นแล้ว ใครมียศก็เห็นห้องมึงได้ตามปกติ
 
             new_channel = await guild.create_voice_channel(
                 name=f"👑 ห้องของ {member.display_name}",
@@ -532,7 +564,7 @@ async def auto_status():
 
 @bot.event
 async def on_ready():
-    print(f'✅ บอท {bot.user} รันระบบกันบัค 100% พร้อมลุยแล้วสัส!')
+    print(f'✅ บอท {bot.user} รันระบบพร้อมลุยแล้วสัส!')
     auto_status.start()
 
 keep_alive()
